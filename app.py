@@ -9,15 +9,11 @@ import numpy as np
 
 # --- 1. Data Loading and Preprocessing ---
 # Load the built-in Titanic dataset
-# Ensure this dataset is available locally or loaded successfully in the Render environment.
 try:
     df = sns.load_dataset('titanic')
 except Exception as e:
-    # If using sns.load_dataset fails (e.g., no internet access during deployment), 
-    # use a fallback or ensure you include a CSV file.
-    # For simplicity, we assume 'titanic' is successfully loaded.
-    print(f"Error loading Seaborn dataset: {e}")
-    # Initialize an empty DataFrame to prevent immediate crash, though this requires a proper fallback.
+    # Fallback for deployment environments that might struggle with external dataset loading
+    print(f"Error loading Seaborn dataset: {e}. Initializing empty DataFrame.")
     df = pd.DataFrame() 
 
 # --- 2. Data Cleaning and Feature Engineering ---
@@ -41,31 +37,25 @@ if not df.empty:
     # Family Size
     df['family_size'] = df['sibsp'] + df['parch'] + 1
     
-    # Fare Group Binning (handling potential duplicates in quantiles)
-    # Using 'q' for quartiles, which handles continuous data better than manual bins for fares.
+    # Fare Group Binning 
     try:
+        # Create 4 fare quantiles
         fare_bins = pd.qcut(df['fare'], q=4, labels=['Q1 (Low)', 'Q2', 'Q3', 'Q4 (High)'], duplicates='drop')
         df['fare_group'] = fare_bins
     except ValueError:
-        # Fallback if fare data is too skewed (e.g., all 0s) to create 4 unique quantiles
+        # Fallback if fare data is too uniform
         df['fare_group'] = pd.cut(df['fare'], bins=3, labels=['Low', 'Medium', 'High'])
 
 
 # --- 3. Derived DataFrames ---
-
 # DataFrame for Graph 2: Survivors Only
 df_after = df[df['survived'] == 1].copy()
 
-# DataFrame for Graph 3: Survival Rate Calculation
-# Group by all categorical features you want to analyze
-rate_cols = ['pclass', 'sex_label', 'age_group', 'embarked', 'who', 'alone', 'family_size', 'fare_group']
-df_rate = df.groupby(rate_cols, dropna=False)['survived'].mean().reset_index()
-df_rate['survival_rate'] = (df_rate['survived'] * 100).round(2)
 
 # --- 4. Plotly Helper Functions ---
 
 def get_composition_fig(data_df, feature, title, color_sequence):
-    """Generates a bar plot for total counts/composition."""
+    """Generates a bar plot for total counts/composition with fixed height."""
     if data_df.empty:
         return go.Figure().add_annotation(text="No data available for this chart.", showarrow=False)
 
@@ -74,21 +64,22 @@ def get_composition_fig(data_df, feature, title, color_sequence):
         x=feature,
         color=feature,
         color_discrete_sequence=color_sequence,
-        # Using a concise title in the graph to avoid overlap with H4
-        title=f"{title} Distribution",
+        title=f"{title} Distribution (Count)",
         text_auto=True
     )
+    # VITAL: Set fixed height in update_layout to match the container style
     fig.update_layout(
         xaxis_title=title,
         yaxis_title="Count of Passengers",
         plot_bgcolor='white',
         margin=dict(t=50, b=50, l=40, r=40),
-        legend_title_text='Category'
+        legend_title_text='Category',
+        height=400  # Fixed height for stable layout
     )
     return fig
 
 def get_survival_fig(data_df, feature, title):
-    """Generates a bar plot for the survival rate percentage."""
+    """Generates a bar plot for the survival rate percentage with fixed height."""
     if data_df.empty:
         return go.Figure().add_annotation(text="No data available for this chart.", showarrow=False)
 
@@ -104,26 +95,26 @@ def get_survival_fig(data_df, feature, title):
         x=feature,
         y='survival_rate',
         color='survival_rate',
-        color_continuous_scale=px.colors.sequential.Sunsetdark, # Red/Orange color scale
-        # Using a concise title in the graph
+        color_continuous_scale=px.colors.sequential.Sunsetdark,
         title=f"{title} Survival Rate (%)",
         text_auto=True
     )
     fig.update_traces(texttemplate='%{y:.1f}%', textposition='outside')
+    # VITAL: Set fixed height in update_layout to match the container style
     fig.update_layout(
         xaxis_title=title,
         yaxis_title="Survival Rate (%)",
         plot_bgcolor='white',
         margin=dict(t=50, b=50, l=40, r=40),
-        coloraxis_showscale=False # Hide the color bar
+        coloraxis_showscale=False,
+        height=500  # Fixed height for stable layout
     )
     return fig
 
 # --- 5. Dash App Setup ---
 app = dash.Dash(__name__, external_stylesheets=['https://codepen.io/chriddyp/pen/bWLwgP.css'])
 
-# VITAL FIX FOR DEPLOYMENT: Expose the Flask server for Gunicorn
-# This MUST be placed AFTER 'app = dash.Dash(...)' to avoid NameError.
+# VITAL FOR DEPLOYMENT: Expose the Flask server instance for Gunicorn
 server = app.server 
 
 # Dictionary to map dropdown selection to internal column names and display titles
@@ -144,7 +135,7 @@ app.layout = html.Div(style={'fontFamily': 'Arial, sans-serif', 'maxWidth': '120
         dcc.Dropdown(
             id='feature-selector',
             options=[{'label': k, 'value': k} for k in FEATURE_OPTIONS.keys()],
-            value='Passenger Class',  # Default value
+            value='Passenger Class',
             clearable=False,
             style={'width': '300px', 'display': 'inline-block'}
         )
@@ -154,19 +145,22 @@ app.layout = html.Div(style={'fontFamily': 'Arial, sans-serif', 'maxWidth': '120
         # Graph 1: Total Population
         html.Div(className='six columns', style={'flex': '1 1 300px', 'margin': '10px', 'padding': '15px', 'border': '1px solid #ddd', 'borderRadius': '8px', 'boxShadow': '2px 2px 5px rgba(0,0,0,0.1)'}, children=[
             html.H4("1. Total Passenger Count", style={'textAlign': 'center', 'color': '#2980b9'}),
-            dcc.Graph(id='graph-before', config={'displayModeBar': False})
+            # VITAL: Set fixed height for the dcc.Graph container
+            dcc.Graph(id='graph-before', config={'displayModeBar': False}, style={'height': '400px'})
         ]),
 
         # Graph 2: Survivors Only
         html.Div(className='six columns', style={'flex': '1 1 300px', 'margin': '10px', 'padding': '15px', 'border': '1px solid #ddd', 'borderRadius': '8px', 'boxShadow': '2px 2px 5px rgba(0,0,0,0.1)'}, children=[
             html.H4("2. Survivors Only Count", style={'textAlign': 'center', 'color': '#27ae60'}),
-            dcc.Graph(id='graph-after', config={'displayModeBar': False})
+            # VITAL: Set fixed height for the dcc.Graph container
+            dcc.Graph(id='graph-after', config={'displayModeBar': False}, style={'height': '400px'})
         ]),
         
         # Graph 3: Survival Rate (%)
         html.Div(className='twelve columns', style={'flex': '1 1 100%', 'margin': '10px', 'padding': '15px', 'border': '1px solid #ddd', 'borderRadius': '8px', 'boxShadow': '2px 2px 5px rgba(0,0,0,0.1)'}, children=[
             html.H4("3. Calculated Survival Rate (%)", style={'textAlign': 'center', 'color': '#e74c3c'}),
-            dcc.Graph(id='graph-rate', config={'displayModeBar': False})
+            # VITAL: Set fixed height for the dcc.Graph container
+            dcc.Graph(id='graph-rate', config={'displayModeBar': False}, style={'height': '500px'})
         ])
     ])
 ])
@@ -185,23 +179,23 @@ def update_graphs(selected_feature_title):
     # Retrieve the internal column name and display title
     feature_col, display_title = FEATURE_OPTIONS.get(selected_feature_title)
     
-    # Graph 1: Before Incident (Total Population) - Blue Palette
+    # Graph 1: Before Incident (Total Population)
     fig_before = get_composition_fig(
         data_df=df, 
         feature=feature_col, 
         title=display_title, 
-        color_sequence=px.colors.qualitative.D3, # Blue/Grey colors
+        color_sequence=px.colors.qualitative.D3,
     )
 
-    # Graph 2: After Incident (Survivors Only) - Green Palette
+    # Graph 2: After Incident (Survivors Only)
     fig_after = get_composition_fig(
         data_df=df_after, 
         feature=feature_col, 
         title=display_title, 
-        color_sequence=px.colors.sequential.Greens_r, # Green colors
+        color_sequence=px.colors.sequential.Greens_r,
     )
 
-    # Graph 3: Survival Rate (%) - Red/Orange Palette
+    # Graph 3: Survival Rate (%)
     fig_rate = get_survival_fig(
         data_df=df, 
         feature=feature_col, 
@@ -209,7 +203,3 @@ def update_graphs(selected_feature_title):
     )
     
     return fig_before, fig_after, fig_rate
-
-# The following lines are not needed because the Procfile calls the Gunicorn server directly.
-# if __name__ == '__main__':
-#     app.run_server(debug=True)
