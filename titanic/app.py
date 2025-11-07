@@ -6,6 +6,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import seaborn as sns 
 import numpy as np
+# Add this line to connect Dash to the underlying Flask server
+server = app.server
 
 # --- 1. Data Loading and Preprocessing ---
 # Load the built-in Titanic dataset
